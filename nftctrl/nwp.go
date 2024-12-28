@@ -83,6 +83,7 @@ func (c *Controller) createPeers(ch *nfds.Chain, peers []nwkv1.NetworkPolicyPeer
 	var meta Rule
 
 	meta.podRefs = make(map[*Pod]struct{})
+	meta.Namespace = nwp.Namespace
 
 	ipRangesPermitted := ranges.NewWithCompare(lessAddrs, closest)
 
