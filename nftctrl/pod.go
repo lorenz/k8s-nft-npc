@@ -300,7 +300,7 @@ func (c *Controller) normalizePod(pod *corev1.Pod) *Pod {
 	p.Name = pod.Name
 	p.Labels = pod.Labels
 	for _, ip := range pod.Status.PodIPs {
-		if pod.Status.Phase != corev1.PodRunning {
+		if pod.Status.Phase != corev1.PodRunning && pod.Status.Phase != corev1.PodPending {
 			continue
 		}
 		pIP, err := netip.ParseAddr(ip.IP)
