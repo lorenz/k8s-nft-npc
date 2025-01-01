@@ -28,6 +28,7 @@ var (
 		"The address of the Kubernetes API server. Overrides any value in kubeconfig. Only required if out-of-cluster.")
 	kubeconfig = flag.String("kubeconfig", "",
 		"Path to a kubeconfig. Only required if out-of-cluster.")
+	podIfaceGroup = flag.Uint("pod-interface-group", 0, "Interface group id for pod-facing interfaces. Recommended in most use cases, required if the nodes also act as routers for non-local traffic.")
 )
 
 type Controller struct {
@@ -158,7 +159,7 @@ func main() {
 	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: "npc"})
 
 	c := Controller{
-		nft:           nftctrl.New(recorder),
+		nft:           nftctrl.New(recorder, uint32(*podIfaceGroup)),
 		eventRecorder: recorder,
 	}
 

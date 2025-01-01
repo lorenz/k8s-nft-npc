@@ -32,7 +32,7 @@ type Controller struct {
 
 const tableName = "k8s-nft-npc"
 
-func New(eventRecorder record.EventRecorder) *Controller {
+func New(eventRecorder record.EventRecorder, podIfaceGroup uint32) *Controller {
 	nftc, err := nftables.New(nftables.AsLasting())
 	if err != nil {
 		klog.Fatalf("Failed opening nftables netlink connection: %s", err)
@@ -94,13 +94,18 @@ func New(eventRecorder record.EventRecorder) *Controller {
 		DataType:     nftables.TypeVerdict,
 	}
 	c.nftConn.AddSet(c.vmapIng, []nftables.SetElement{})
+	var ingPrefilter []expr.Any
+	if podIfaceGroup != 0 {
+		ingPrefilter = append(ingPrefilter, &expr.Meta{Key: expr.MetaKeyOIFGROUP, Register: newRegOffset + 0},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: newRegOffset + 0, Data: binaryutil.NativeEndian.PutUint32(podIfaceGroup)})
+	}
 	c.nftConn.AddRule(&nfds.Rule{
 		Table: c.table,
 		Chain: podTrafficChain,
-		Exprs: []expr.Any{
+		Exprs: append(ingPrefilter,
 			loadIP(dirEgress, 0),
 			lookup(Lookup{DestRegister: 0, IsDestRegSet: true, SourceRegister: newRegOffset + 0, Set: c.vmapIng}),
-		},
+		),
 	})
 
 	c.vmapEg = &nfds.Set{
@@ -113,13 +118,18 @@ func New(eventRecorder record.EventRecorder) *Controller {
 		DataType:     nftables.TypeVerdict,
 	}
 	c.nftConn.AddSet(c.vmapEg, []nftables.SetElement{})
+	var egPrefilter []expr.Any
+	if podIfaceGroup != 0 {
+		egPrefilter = append(egPrefilter, &expr.Meta{Key: expr.MetaKeyIIFGROUP, Register: newRegOffset + 0},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: newRegOffset + 0, Data: binaryutil.NativeEndian.PutUint32(podIfaceGroup)})
+	}
 	c.nftConn.AddRule(&nfds.Rule{
 		Table: c.table,
 		Chain: podTrafficChain,
-		Exprs: []expr.Any{
+		Exprs: append(egPrefilter,
 			loadIP(dirIngress, 0),
 			lookup(Lookup{DestRegister: 0, IsDestRegSet: true, SourceRegister: newRegOffset + 0, Set: c.vmapEg}),
-		},
+		),
 	})
 	return c
 }
