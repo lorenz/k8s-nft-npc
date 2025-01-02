@@ -1,7 +1,7 @@
 package nftctrl
 
 import (
-	"git.dolansoft.org/lorenz/k8s-nft-npc/nfds"
+	"git.dolansoft.org/dolansoft/k8s-nft-npc/nfds"
 	"github.com/google/nftables/expr"
 	"golang.org/x/sys/unix"
 )

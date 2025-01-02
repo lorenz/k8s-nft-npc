@@ -1,4 +1,4 @@
-module git.dolansoft.org/lorenz/k8s-nft-npc
+module git.dolansoft.org/dolansoft/k8s-nft-npc
 
 go 1.23.0
 

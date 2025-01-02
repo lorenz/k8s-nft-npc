@@ -20,7 +20,7 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/kubectl/pkg/scheme"
 
-	"git.dolansoft.org/lorenz/k8s-nft-npc/nftctrl"
+	"git.dolansoft.org/dolansoft/k8s-nft-npc/nftctrl"
 )
 
 var (

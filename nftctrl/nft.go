@@ -3,8 +3,8 @@ package nftctrl
 import (
 	"net/netip"
 
-	"git.dolansoft.org/lorenz/k8s-nft-npc/nfds"
-	"git.dolansoft.org/lorenz/k8s-nft-npc/ranges"
+	"git.dolansoft.org/dolansoft/k8s-nft-npc/nfds"
+	"git.dolansoft.org/dolansoft/k8s-nft-npc/ranges"
 	"github.com/google/nftables"
 	"github.com/google/nftables/binaryutil"
 	"github.com/google/nftables/expr"
