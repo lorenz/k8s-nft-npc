@@ -76,9 +76,9 @@ func New(eventRecorder record.EventRecorder, podIfaceGroup uint32) *Controller {
 	}
 	c.nftConn.AddTable(c.table)
 
-	podTrafficChain := c.nftConn.AddChain(&nfds.Chain{
+	podTrafficChainIng := c.nftConn.AddChain(&nfds.Chain{
 		Table:   c.table,
-		Name:    "filter_hook",
+		Name:    "filter_hook_ing",
 		Type:    nftables.ChainTypeFilter,
 		Hooknum: nftables.ChainHookForward,
 		// Hook traffic after IPVS and other shenanigans
@@ -101,13 +101,21 @@ func New(eventRecorder record.EventRecorder, podIfaceGroup uint32) *Controller {
 	}
 	c.nftConn.AddRule(&nfds.Rule{
 		Table: c.table,
-		Chain: podTrafficChain,
+		Chain: podTrafficChainIng,
 		Exprs: append(ingPrefilter,
 			loadIP(dirEgress, 0),
 			lookup(Lookup{DestRegister: 0, IsDestRegSet: true, SourceRegister: newRegOffset + 0, Set: c.vmapIng}),
 		),
 	})
 
+	podTrafficChainEg := c.nftConn.AddChain(&nfds.Chain{
+		Table:   c.table,
+		Name:    "filter_hook_eg",
+		Type:    nftables.ChainTypeFilter,
+		Hooknum: nftables.ChainHookForward,
+		// Hook traffic after IPVS and other shenanigans
+		Priority: nftables.ChainPrioritySELinuxLast,
+	})
 	c.vmapEg = &nfds.Set{
 		Table:        c.table,
 		Name:         "vmap_eg",
@@ -125,7 +133,7 @@ func New(eventRecorder record.EventRecorder, podIfaceGroup uint32) *Controller {
 	}
 	c.nftConn.AddRule(&nfds.Rule{
 		Table: c.table,
-		Chain: podTrafficChain,
+		Chain: podTrafficChainEg,
 		Exprs: append(egPrefilter,
 			loadIP(dirIngress, 0),
 			lookup(Lookup{DestRegister: 0, IsDestRegSet: true, SourceRegister: newRegOffset + 0, Set: c.vmapEg}),
