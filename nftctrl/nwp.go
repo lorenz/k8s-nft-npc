@@ -422,13 +422,6 @@ func (c *Controller) createNWP(nwp *nwkv1.NetworkPolicy, name cache.ObjectName) 
 			pm.IngressRuleMeta = append(pm.IngressRuleMeta, meta)
 			c.rules[meta] = struct{}{}
 		}
-		c.nftConn.AddRule(&nfds.Rule{
-			Table: c.table,
-			Chain: &ingChain,
-			Exprs: []expr.Any{
-				&expr.Verdict{Kind: expr.VerdictReturn},
-			},
-		})
 		pm.ingressChain = &ingChain
 	}
 	if isEgress {
@@ -449,13 +442,6 @@ func (c *Controller) createNWP(nwp *nwkv1.NetworkPolicy, name cache.ObjectName) 
 			pm.EgressRuleMeta = append(pm.EgressRuleMeta, meta)
 			c.rules[meta] = struct{}{}
 		}
-		c.nftConn.AddRule(&nfds.Rule{
-			Table: c.table,
-			Chain: &egChain,
-			Exprs: []expr.Any{
-				&expr.Verdict{Kind: expr.VerdictReturn},
-			},
-		})
 		pm.egressChain = &egChain
 	}
 
