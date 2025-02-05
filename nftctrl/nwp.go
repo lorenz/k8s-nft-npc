@@ -266,7 +266,8 @@ func (c *Controller) createPeers(ch *nfds.Chain, peers []nwkv1.NetworkPolicyPeer
 					Data:     binary.BigEndian.AppendUint16(nil, p.Port),
 				})
 			}
-		} else if ipRangesPermitted.Len() > 0 || len(meta.PodSelectors) > 0 { // Set-based for complex port restrictions
+		} else if ipRangesPermitted.Len() > 0 || len(meta.PodSelectors) > 0 || len(peers) == 0 {
+			// Set-based for complex port restrictions
 			protoPortSet := nfds.Set{
 				Table:         c.table,
 				Anonymous:     true,
@@ -363,6 +364,14 @@ func (c *Controller) createPeers(ch *nfds.Chain, peers []nwkv1.NetworkPolicyPeer
 			}),
 		}
 		exprs = append(exprs, portProtoExprs...)
+		c.nftConn.AddRule(&nfds.Rule{
+			Table: c.table,
+			Chain: ch,
+			Exprs: append(exprs, &expr.Verdict{Kind: expr.VerdictAccept}),
+		})
+	}
+	if len(peers) == 0 {
+		exprs := append([]expr.Any{}, portProtoExprs...)
 		c.nftConn.AddRule(&nfds.Rule{
 			Table: c.table,
 			Chain: ch,
