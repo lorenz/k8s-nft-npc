@@ -138,6 +138,10 @@ func (c *Controller) Flush() error {
 	return c.nftConn.Flush()
 }
 
+func (c *Controller) Close() error {
+	return c.nftConn.CloseLasting()
+}
+
 func prefixToRange(net netip.Prefix) ranges.Range[netip.Addr] {
 	return ranges.Range[netip.Addr]{
 		Start: net.Masked().Addr(),

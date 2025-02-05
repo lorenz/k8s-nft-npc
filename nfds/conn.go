@@ -13,3 +13,7 @@ func WrapConn(c *nftables.Conn) *Conn {
 func (c *Conn) Flush() error {
 	return c.c.Flush()
 }
+
+func (c *Conn) CloseLasting() error {
+	return c.c.CloseLasting()
+}
