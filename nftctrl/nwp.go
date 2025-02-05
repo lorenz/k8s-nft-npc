@@ -394,6 +394,9 @@ func (c *Controller) createNWP(nwp *nwkv1.NetworkPolicy, name cache.ObjectName) 
 	var isIngress, isEgress bool
 	if len(nwp.Spec.PolicyTypes) == 0 {
 		isIngress = true // K8s default if no PolicyTypes are present
+		if len(nwp.Spec.Egress) != 0 {
+			isEgress = true
+		}
 	}
 	for _, pt := range nwp.Spec.PolicyTypes {
 		if pt == nwkv1.PolicyTypeEgress {
