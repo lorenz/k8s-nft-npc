@@ -64,7 +64,7 @@ func (pm *Pod) namedPortElements(nms []RuleNamedPortMeta) []nftables.SetElement 
 				continue
 			}
 			elems = append(elems, nftables.SetElement{
-				Key: binary.NativeEndian.AppendUint16(append(ip.AsSlice(), 0, 0, 0, nm.Protocol, 0, 0), portNum),
+				Key: append(append(binary.BigEndian.AppendUint16([]byte{nm.Protocol, 0, 0, 0}, portNum), 0, 0), ip.AsSlice()...),
 			})
 		}
 	}

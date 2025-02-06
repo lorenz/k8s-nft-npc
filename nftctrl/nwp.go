@@ -206,8 +206,9 @@ func (c *Controller) createPeers(ch *nfds.Chain, peers []nwkv1.NetworkPolicyPeer
 		namedPortSet := nfds.Set{
 			Table:         c.table,
 			Name:          prefix + "_namedports",
-			KeyType:       nftables.MustConcatSetType(nftables.TypeIPAddr, nftables.TypeInetProto, nftables.TypeInetService),
-			KeyType6:      nftables.MustConcatSetType(nftables.TypeIP6Addr, nftables.TypeInetProto, nftables.TypeInetService),
+			KeyType:       nftables.MustConcatSetType(nftables.TypeInetProto, nftables.TypeInetService, nftables.TypeIPAddr),
+			KeyType6:      nftables.MustConcatSetType(nftables.TypeInetProto, nftables.TypeInetService, nftables.TypeIP6Addr),
+			KeyByteOrder:  binaryutil.BigEndian,
 			Concatenation: true,
 		}
 		c.nftConn.AddSet(&namedPortSet, []nftables.SetElement{})
@@ -217,15 +218,15 @@ func (c *Controller) createPeers(ch *nfds.Chain, peers []nwkv1.NetworkPolicyPeer
 			Table: c.table,
 			Chain: ch,
 			Exprs: []expr.Any{
-				// Load IP address into register 0
-				loadIP(dir, 0),
-				// Load Layer 4 protocol into register 2
+				// Load Layer 4 protocol into register 0
 				&expr.Meta{
 					Key:      expr.MetaKeyL4PROTO,
-					Register: newRegOffset + 4,
+					Register: newRegOffset + 0,
 				},
-				// Load Port into register 5
-				loadDstPort(5),
+				// Load Port into register 1
+				loadDstPort(1),
+				// Load IP address into register 2 (IPv4) or 2-5 (IPv6)
+				loadIP(dir, 2),
 				// Abort if IP/port/L4 protocol is not in permitted set
 				lookup(Lookup{
 					Set:            &namedPortSet,
