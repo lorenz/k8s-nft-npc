@@ -59,13 +59,9 @@ func (c *Controller) updateNS(old, new *Namespace) {
 }
 
 func (c *Controller) reevalPodInRule(pm *Pod, r *Rule) {
-	for _, sel := range r.PodSelectors {
-		if !sel.Matches(pm, r.Namespace, c.namespaces) {
-			continue
-		}
-		if _, ok := r.podRefs[pm]; ok {
-			return
-		}
+	isSelected := c.ruleSelectsPod(r, pm)
+	_, wasSelected := r.podRefs[pm]
+	if isSelected && !wasSelected {
 		pm.ruleRefs[r] = struct{}{}
 		r.podRefs[pm] = struct{}{}
 		if r.PodIPSet != nil {
@@ -74,11 +70,7 @@ func (c *Controller) reevalPodInRule(pm *Pod, r *Rule) {
 		if r.NamedPortSet != nil {
 			c.nftConn.SetAddElements(r.NamedPortSet, pm.namedPortElements(r.NamedPortMeta))
 		}
-		// Pod got selected by at least one selector, more do not change anything
-		return
-	}
-	if _, ok := r.podRefs[pm]; ok {
-		// Pod was previously selected but is no more, remove it from the rule
+	} else if !isSelected && wasSelected {
 		delete(r.podRefs, pm)
 		delete(pm.ruleRefs, r)
 		if r.PodIPSet != nil {

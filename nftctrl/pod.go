@@ -217,11 +217,18 @@ func (c *Controller) removePodNWP(p *Pod, pm *Policy) {
 	}
 }
 
-func (c *Controller) addPodRule(r *Rule, pm *Pod) {
+func (c *Controller) ruleSelectsPod(r *Rule, pm *Pod) bool {
 	for _, sel := range r.PodSelectors {
-		if !sel.Matches(pm, r.Namespace, c.namespaces) {
-			continue
+		if sel.Matches(pm, r.Namespace, c.namespaces) {
+			return true
 		}
+	}
+	// Rules with named ports but no peer restriction select all pods.
+	return len(r.PodSelectors) == 0 && r.NamedPortSet != nil
+}
+
+func (c *Controller) addPodRule(r *Rule, pm *Pod) {
+	if c.ruleSelectsPod(r, pm) {
 		pm.ruleRefs[r] = struct{}{}
 		r.podRefs[pm] = struct{}{}
 		if r.PodIPSet != nil {
@@ -230,8 +237,6 @@ func (c *Controller) addPodRule(r *Rule, pm *Pod) {
 		if r.NamedPortSet != nil {
 			c.nftConn.SetAddElements(r.NamedPortSet, pm.namedPortElements(r.NamedPortMeta))
 		}
-		// Pod got selected by at least one selector, more do not change anything
-		break
 	}
 }
 

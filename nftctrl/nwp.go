@@ -197,7 +197,7 @@ func (c *Controller) createPeers(ch *nfds.Chain, peers []nwkv1.NetworkPolicyPeer
 
 	// Handle special named ports first as they work differently from the
 	// rest of the system.
-	if len(dynPorts) > 0 && len(meta.PodSelectors) > 0 {
+	if len(dynPorts) > 0 && (len(meta.PodSelectors) > 0 || len(peers) == 0) {
 		namedPortSet := nfds.Set{
 			Table:         c.table,
 			Name:          prefix + "_namedports",
