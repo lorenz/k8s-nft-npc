@@ -149,15 +149,10 @@ func (c *Controller) createPeers(ch *nfds.Chain, peers []nwkv1.NetworkPolicyPeer
 		// TCP is default
 		var proto uint8 = unix.IPPROTO_TCP
 		if port.Protocol != nil {
-			switch *port.Protocol {
-			case corev1.ProtocolTCP:
-				proto = unix.IPPROTO_TCP
-			case corev1.ProtocolUDP:
-				proto = unix.IPPROTO_UDP
-			case corev1.ProtocolSCTP:
-				proto = unix.IPPROTO_SCTP
-			default:
-				c.eventRecorder.Eventf(nwp, corev1.EventTypeWarning, "InvalidPort", "port protocol %q unknown, ignoring port", *port.Protocol)
+			var ok bool
+			proto, ok = parseProtocol(*port.Protocol)
+			if !ok {
+				c.eventRecorder.Eventf(nwp, corev1.EventTypeWarning, "UnknownProtocol", "port protocol %q unknown, ignoring port", *port.Protocol)
 				continue
 			}
 		}

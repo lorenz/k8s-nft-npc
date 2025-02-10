@@ -10,6 +10,7 @@ import (
 	"github.com/google/nftables"
 	"github.com/google/nftables/binaryutil"
 	"github.com/google/nftables/expr"
+	"golang.org/x/sys/unix"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/tools/cache"
@@ -21,13 +22,18 @@ type Pod struct {
 	Name       string
 	Labels     labels.Set
 	IPs        []netip.Addr
-	NamedPorts map[string]uint16
+	NamedPorts map[string]NamedPort
 
 	ingressChain, egressChain *nfds.Chain
 
 	ruleRefs map[*Rule]struct{}
 
 	ingressPolicyRefs, egressPolicyRefs map[*Policy]*nfds.Rule
+}
+
+type NamedPort struct {
+	Protocol uint8
+	Port     uint16
 }
 
 func (pm *Pod) vmapElements(chain *nfds.Chain) []nftables.SetElement {
@@ -58,13 +64,12 @@ func (pm *Pod) namedPortElements(nms []RuleNamedPortMeta) []nftables.SetElement 
 	var elems []nftables.SetElement
 	for _, ip := range pm.IPs {
 		for _, nm := range nms {
-			// TODO: Protocols
-			portNum, ok := pm.NamedPorts[nm.PortName]
-			if !ok {
+			port, ok := pm.NamedPorts[nm.PortName]
+			if !ok || port.Protocol != nm.Protocol {
 				continue
 			}
 			elems = append(elems, nftables.SetElement{
-				Key: append(append(binary.BigEndian.AppendUint16([]byte{nm.Protocol, 0, 0, 0}, portNum), 0, 0), ip.AsSlice()...),
+				Key: append(append(binary.BigEndian.AppendUint16([]byte{nm.Protocol, 0, 0, 0}, port.Port), 0, 0), ip.AsSlice()...),
 			})
 		}
 	}
@@ -310,31 +315,49 @@ func (c *Controller) normalizePod(pod *corev1.Pod) *Pod {
 		}
 		p.IPs = append(p.IPs, pIP)
 	}
-	p.NamedPorts = make(map[string]uint16)
+	p.NamedPorts = make(map[string]NamedPort)
 	p.ruleRefs = make(map[*Rule]struct{})
 	p.egressPolicyRefs = make(map[*Policy]*nfds.Rule)
 	p.ingressPolicyRefs = make(map[*Policy]*nfds.Rule)
-	for _, container := range pod.Spec.Containers {
-		for _, port := range container.Ports {
-			if port.Name != "" {
-				if port.ContainerPort > math.MaxUint16 {
-					c.eventRecorder.Eventf(pod, corev1.EventTypeWarning, "InvalidPort", "Container %v port %v is out of range, ignore", container.Name, port.ContainerPort)
-					continue
+	for _, containers := range [][]corev1.Container{pod.Spec.Containers, pod.Spec.InitContainers} {
+		for _, container := range containers {
+			for _, port := range container.Ports {
+				if port.Name != "" {
+					if port.ContainerPort > math.MaxUint16 {
+						c.eventRecorder.Eventf(pod, corev1.EventTypeWarning, "InvalidPort", "Container %v port %v is out of range, ignore", container.Name, port.ContainerPort)
+						continue
+					}
+					var proto uint8 = unix.IPPROTO_TCP
+					if port.Protocol != "" {
+						var ok bool
+						proto, ok = parseProtocol(port.Protocol)
+						if !ok {
+							// Ignore unknown protocol without logging. We already log unknown
+							// protocols in policies, and as long as no policy mentions a
+							// protocol, it doesn't matter whether we support it.
+							continue
+						}
+					}
+					p.NamedPorts[port.Name] = NamedPort{
+						Protocol: proto,
+						Port:     uint16(port.ContainerPort),
+					}
 				}
-				p.NamedPorts[port.Name] = uint16(port.ContainerPort)
-			}
-		}
-	}
-	for _, container := range pod.Spec.InitContainers {
-		for _, port := range container.Ports {
-			if port.Name != "" {
-				if port.ContainerPort > math.MaxUint16 {
-					c.eventRecorder.Eventf(pod, corev1.EventTypeWarning, "InvalidPort", "Container %v port %v is out of range, ignore", container.Name, port.ContainerPort)
-					continue
-				}
-				p.NamedPorts[port.Name] = uint16(port.ContainerPort)
 			}
 		}
 	}
 	return &p
+}
+
+func parseProtocol(protocol corev1.Protocol) (proto uint8, ok bool) {
+	switch protocol {
+	case corev1.ProtocolTCP:
+		return unix.IPPROTO_TCP, true
+	case corev1.ProtocolUDP:
+		return unix.IPPROTO_UDP, true
+	case corev1.ProtocolSCTP:
+		return unix.IPPROTO_SCTP, true
+	default:
+		return 0, false
+	}
 }
