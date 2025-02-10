@@ -64,7 +64,7 @@ func (c *Controller) reevalPodInRule(pm *Pod, r *Rule) {
 			continue
 		}
 		if _, ok := r.podRefs[pm]; ok {
-			break
+			return
 		}
 		pm.ruleRefs[r] = struct{}{}
 		r.podRefs[pm] = struct{}{}
