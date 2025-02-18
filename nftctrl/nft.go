@@ -8,6 +8,7 @@ import (
 	"github.com/google/nftables"
 	"github.com/google/nftables/binaryutil"
 	"github.com/google/nftables/expr"
+	"github.com/mdlayher/netlink"
 	"go4.org/netipx"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
@@ -33,7 +34,15 @@ type Controller struct {
 const tableName = "k8s-nft-npc"
 
 func New(eventRecorder record.EventRecorder, podIfaceGroup uint32) *Controller {
-	nftc, err := nftables.New(nftables.AsLasting())
+	nftc, err := nftables.New(nftables.AsLasting(), nftables.WithSockOptions(func(conn *netlink.Conn) error {
+		if err := conn.SetWriteBuffer(1 << 22); err != nil {
+			return err
+		}
+		if err := conn.SetReadBuffer(1 << 22); err != nil {
+			return err
+		}
+		return nil
+	}))
 	if err != nil {
 		klog.Fatalf("Failed opening nftables netlink connection: %s", err)
 	}
