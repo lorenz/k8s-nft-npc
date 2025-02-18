@@ -84,6 +84,17 @@ func New(eventRecorder record.EventRecorder, podIfaceGroup uint32) *Controller {
 		// Hook traffic after IPVS and other shenanigans
 		Priority: nftables.ChainPrioritySELinuxLast,
 	})
+	c.nftConn.AddRule(&nfds.Rule{
+		Table: c.table,
+		Chain: podTrafficChainIng,
+		Exprs: []expr.Any{
+			// Accept packets for established or related connections
+			&expr.Ct{Key: expr.CtKeySTATE, Register: newRegOffset + 1},
+			&expr.Bitwise{SourceRegister: newRegOffset + 1, DestRegister: newRegOffset + 1, Len: 4, Mask: binaryutil.NativeEndian.PutUint32(expr.CtStateBitESTABLISHED | expr.CtStateBitRELATED), Xor: binaryutil.NativeEndian.PutUint32(0)},
+			&expr.Cmp{Op: expr.CmpOpNeq, Register: newRegOffset + 1, Data: binaryutil.NativeEndian.PutUint32(0)},
+			&expr.Verdict{Kind: expr.VerdictAccept},
+		},
+	})
 	c.vmapIng = &nfds.Set{
 		Table:        c.table,
 		Name:         "vmap_ing",
@@ -115,6 +126,17 @@ func New(eventRecorder record.EventRecorder, podIfaceGroup uint32) *Controller {
 		Hooknum: nftables.ChainHookForward,
 		// Hook traffic after IPVS and other shenanigans
 		Priority: nftables.ChainPrioritySELinuxLast,
+	})
+	c.nftConn.AddRule(&nfds.Rule{
+		Table: c.table,
+		Chain: podTrafficChainEg,
+		Exprs: []expr.Any{
+			// Accept packets for established or related connections
+			&expr.Ct{Key: expr.CtKeySTATE, Register: newRegOffset + 1},
+			&expr.Bitwise{SourceRegister: newRegOffset + 1, DestRegister: newRegOffset + 1, Len: 4, Mask: binaryutil.NativeEndian.PutUint32(expr.CtStateBitESTABLISHED | expr.CtStateBitRELATED), Xor: binaryutil.NativeEndian.PutUint32(0)},
+			&expr.Cmp{Op: expr.CmpOpNeq, Register: newRegOffset + 1, Data: binaryutil.NativeEndian.PutUint32(0)},
+			&expr.Verdict{Kind: expr.VerdictAccept},
+		},
 	})
 	c.vmapEg = &nfds.Set{
 		Table:        c.table,

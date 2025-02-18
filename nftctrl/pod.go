@@ -8,7 +8,6 @@ import (
 
 	"git.dolansoft.org/dolansoft/k8s-nft-npc/nfds"
 	"github.com/google/nftables"
-	"github.com/google/nftables/binaryutil"
 	"github.com/google/nftables/expr"
 	"golang.org/x/sys/unix"
 	corev1 "k8s.io/api/core/v1"
@@ -117,17 +116,6 @@ func (c *Controller) addPodNWP(nwp *Policy, pm *Pod) {
 				Table: c.table,
 				Chain: pm.ingressChain,
 				Exprs: []expr.Any{
-					// Accept packets for established or related connections
-					&expr.Ct{Key: expr.CtKeySTATE, Register: newRegOffset + 1},
-					&expr.Bitwise{SourceRegister: newRegOffset + 1, DestRegister: newRegOffset + 1, Len: 4, Mask: binaryutil.NativeEndian.PutUint32(expr.CtStateBitESTABLISHED | expr.CtStateBitRELATED), Xor: binaryutil.NativeEndian.PutUint32(0)},
-					&expr.Cmp{Op: expr.CmpOpNeq, Register: newRegOffset + 1, Data: binaryutil.NativeEndian.PutUint32(0)},
-					&expr.Verdict{Kind: expr.VerdictAccept},
-				},
-			})
-			c.nftConn.AddRule(&nfds.Rule{
-				Table: c.table,
-				Chain: pm.ingressChain,
-				Exprs: []expr.Any{
 					// Reject everything not permitted directly by a network policy or
 					// related to a connection permitted by it.
 					rejectAdministrative(),
@@ -152,17 +140,6 @@ func (c *Controller) addPodNWP(nwp *Policy, pm *Pod) {
 				Name:  fmt.Sprintf("pod_%s_%s_eg", pm.Namespace, pm.Name),
 				Table: c.table,
 				Type:  nftables.ChainTypeFilter,
-			})
-			c.nftConn.AddRule(&nfds.Rule{
-				Table: c.table,
-				Chain: pm.egressChain,
-				Exprs: []expr.Any{
-					// Accept packets for established or related connections
-					&expr.Ct{Key: expr.CtKeySTATE, Register: newRegOffset + 1},
-					&expr.Bitwise{SourceRegister: newRegOffset + 1, DestRegister: newRegOffset + 1, Len: 4, Mask: binaryutil.NativeEndian.PutUint32(expr.CtStateBitESTABLISHED | expr.CtStateBitRELATED), Xor: binaryutil.NativeEndian.PutUint32(0)},
-					&expr.Cmp{Op: expr.CmpOpNeq, Register: newRegOffset + 1, Data: binaryutil.NativeEndian.PutUint32(0)},
-					&expr.Verdict{Kind: expr.VerdictAccept},
-				},
 			})
 			c.nftConn.AddRule(&nfds.Rule{
 				Table: c.table,
