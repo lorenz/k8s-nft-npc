@@ -8,6 +8,7 @@ import (
 	"github.com/google/nftables"
 	"github.com/google/nftables/binaryutil"
 	"github.com/google/nftables/expr"
+	"github.com/mdlayher/netlink"
 	"go4.org/netipx"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
@@ -33,7 +34,15 @@ type Controller struct {
 const tableName = "k8s-nft-npc"
 
 func New(eventRecorder record.EventRecorder, podIfaceGroup uint32) *Controller {
-	nftc, err := nftables.New(nftables.AsLasting())
+	nftc, err := nftables.New(nftables.AsLasting(), nftables.WithSockOptions(func(conn *netlink.Conn) error {
+		if err := conn.SetWriteBuffer(1 << 22); err != nil {
+			return err
+		}
+		if err := conn.SetReadBuffer(1 << 22); err != nil {
+			return err
+		}
+		return nil
+	}))
 	if err != nil {
 		klog.Fatalf("Failed opening nftables netlink connection: %s", err)
 	}
@@ -76,13 +85,24 @@ func New(eventRecorder record.EventRecorder, podIfaceGroup uint32) *Controller {
 	}
 	c.nftConn.AddTable(c.table)
 
-	podTrafficChain := c.nftConn.AddChain(&nfds.Chain{
+	podTrafficChainIng := c.nftConn.AddChain(&nfds.Chain{
 		Table:   c.table,
-		Name:    "filter_hook",
+		Name:    "filter_hook_ing",
 		Type:    nftables.ChainTypeFilter,
 		Hooknum: nftables.ChainHookForward,
 		// Hook traffic after IPVS and other shenanigans
 		Priority: nftables.ChainPrioritySELinuxLast,
+	})
+	c.nftConn.AddRule(&nfds.Rule{
+		Table: c.table,
+		Chain: podTrafficChainIng,
+		Exprs: []expr.Any{
+			// Accept packets for established or related connections
+			&expr.Ct{Key: expr.CtKeySTATE, Register: newRegOffset + 1},
+			&expr.Bitwise{SourceRegister: newRegOffset + 1, DestRegister: newRegOffset + 1, Len: 4, Mask: binaryutil.NativeEndian.PutUint32(expr.CtStateBitESTABLISHED | expr.CtStateBitRELATED), Xor: binaryutil.NativeEndian.PutUint32(0)},
+			&expr.Cmp{Op: expr.CmpOpNeq, Register: newRegOffset + 1, Data: binaryutil.NativeEndian.PutUint32(0)},
+			&expr.Verdict{Kind: expr.VerdictAccept},
+		},
 	})
 	c.vmapIng = &nfds.Set{
 		Table:        c.table,
@@ -101,13 +121,32 @@ func New(eventRecorder record.EventRecorder, podIfaceGroup uint32) *Controller {
 	}
 	c.nftConn.AddRule(&nfds.Rule{
 		Table: c.table,
-		Chain: podTrafficChain,
+		Chain: podTrafficChainIng,
 		Exprs: append(ingPrefilter,
 			loadIP(dirEgress, 0),
 			lookup(Lookup{DestRegister: 0, IsDestRegSet: true, SourceRegister: newRegOffset + 0, Set: c.vmapIng}),
 		),
 	})
 
+	podTrafficChainEg := c.nftConn.AddChain(&nfds.Chain{
+		Table:   c.table,
+		Name:    "filter_hook_eg",
+		Type:    nftables.ChainTypeFilter,
+		Hooknum: nftables.ChainHookForward,
+		// Hook traffic after IPVS and other shenanigans
+		Priority: nftables.ChainPrioritySELinuxLast,
+	})
+	c.nftConn.AddRule(&nfds.Rule{
+		Table: c.table,
+		Chain: podTrafficChainEg,
+		Exprs: []expr.Any{
+			// Accept packets for established or related connections
+			&expr.Ct{Key: expr.CtKeySTATE, Register: newRegOffset + 1},
+			&expr.Bitwise{SourceRegister: newRegOffset + 1, DestRegister: newRegOffset + 1, Len: 4, Mask: binaryutil.NativeEndian.PutUint32(expr.CtStateBitESTABLISHED | expr.CtStateBitRELATED), Xor: binaryutil.NativeEndian.PutUint32(0)},
+			&expr.Cmp{Op: expr.CmpOpNeq, Register: newRegOffset + 1, Data: binaryutil.NativeEndian.PutUint32(0)},
+			&expr.Verdict{Kind: expr.VerdictAccept},
+		},
+	})
 	c.vmapEg = &nfds.Set{
 		Table:        c.table,
 		Name:         "vmap_eg",
@@ -125,7 +164,7 @@ func New(eventRecorder record.EventRecorder, podIfaceGroup uint32) *Controller {
 	}
 	c.nftConn.AddRule(&nfds.Rule{
 		Table: c.table,
-		Chain: podTrafficChain,
+		Chain: podTrafficChainEg,
 		Exprs: append(egPrefilter,
 			loadIP(dirIngress, 0),
 			lookup(Lookup{DestRegister: 0, IsDestRegSet: true, SourceRegister: newRegOffset + 0, Set: c.vmapEg}),

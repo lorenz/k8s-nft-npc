@@ -149,15 +149,10 @@ func (c *Controller) createPeers(ch *nfds.Chain, peers []nwkv1.NetworkPolicyPeer
 		// TCP is default
 		var proto uint8 = unix.IPPROTO_TCP
 		if port.Protocol != nil {
-			switch *port.Protocol {
-			case corev1.ProtocolTCP:
-				proto = unix.IPPROTO_TCP
-			case corev1.ProtocolUDP:
-				proto = unix.IPPROTO_UDP
-			case corev1.ProtocolSCTP:
-				proto = unix.IPPROTO_SCTP
-			default:
-				c.eventRecorder.Eventf(nwp, corev1.EventTypeWarning, "InvalidPort", "port protocol %q unknown, ignoring port", *port.Protocol)
+			var ok bool
+			proto, ok = parseProtocol(*port.Protocol)
+			if !ok {
+				c.eventRecorder.Eventf(nwp, corev1.EventTypeWarning, "UnknownProtocol", "port protocol %q unknown, ignoring port", *port.Protocol)
 				continue
 			}
 		}
@@ -202,12 +197,13 @@ func (c *Controller) createPeers(ch *nfds.Chain, peers []nwkv1.NetworkPolicyPeer
 
 	// Handle special named ports first as they work differently from the
 	// rest of the system.
-	if len(dynPorts) > 0 && len(meta.PodSelectors) > 0 {
+	if len(dynPorts) > 0 && (len(meta.PodSelectors) > 0 || len(peers) == 0) {
 		namedPortSet := nfds.Set{
 			Table:         c.table,
 			Name:          prefix + "_namedports",
-			KeyType:       nftables.MustConcatSetType(nftables.TypeIPAddr, nftables.TypeInetProto, nftables.TypeInetService),
-			KeyType6:      nftables.MustConcatSetType(nftables.TypeIP6Addr, nftables.TypeInetProto, nftables.TypeInetService),
+			KeyType:       nftables.MustConcatSetType(nftables.TypeInetProto, nftables.TypeInetService, nftables.TypeIPAddr),
+			KeyType6:      nftables.MustConcatSetType(nftables.TypeInetProto, nftables.TypeInetService, nftables.TypeIP6Addr),
+			KeyByteOrder:  binaryutil.BigEndian,
 			Concatenation: true,
 		}
 		c.nftConn.AddSet(&namedPortSet, []nftables.SetElement{})
@@ -217,15 +213,15 @@ func (c *Controller) createPeers(ch *nfds.Chain, peers []nwkv1.NetworkPolicyPeer
 			Table: c.table,
 			Chain: ch,
 			Exprs: []expr.Any{
-				// Load IP address into register 0
-				loadIP(dir, 0),
-				// Load Layer 4 protocol into register 2
+				// Load Layer 4 protocol into register 0
 				&expr.Meta{
 					Key:      expr.MetaKeyL4PROTO,
-					Register: newRegOffset + 4,
+					Register: newRegOffset + 0,
 				},
-				// Load Port into register 5
-				loadDstPort(5),
+				// Load Port into register 1
+				loadDstPort(1),
+				// Load IP address into register 2 (IPv4) or 2-5 (IPv6)
+				loadIP(dir, 2),
 				// Abort if IP/port/L4 protocol is not in permitted set
 				lookup(Lookup{
 					Set:            &namedPortSet,
@@ -266,7 +262,8 @@ func (c *Controller) createPeers(ch *nfds.Chain, peers []nwkv1.NetworkPolicyPeer
 					Data:     binary.BigEndian.AppendUint16(nil, p.Port),
 				})
 			}
-		} else if ipRangesPermitted.Len() > 0 || len(meta.PodSelectors) > 0 { // Set-based for complex port restrictions
+		} else if ipRangesPermitted.Len() > 0 || len(meta.PodSelectors) > 0 || len(peers) == 0 {
+			// Set-based for complex port restrictions
 			protoPortSet := nfds.Set{
 				Table:         c.table,
 				Anonymous:     true,
@@ -369,6 +366,14 @@ func (c *Controller) createPeers(ch *nfds.Chain, peers []nwkv1.NetworkPolicyPeer
 			Exprs: append(exprs, &expr.Verdict{Kind: expr.VerdictAccept}),
 		})
 	}
+	if len(peers) == 0 {
+		exprs := append([]expr.Any{}, portProtoExprs...)
+		c.nftConn.AddRule(&nfds.Rule{
+			Table: c.table,
+			Chain: ch,
+			Exprs: append(exprs, &expr.Verdict{Kind: expr.VerdictAccept}),
+		})
+	}
 	return &meta, nil
 }
 
@@ -385,6 +390,9 @@ func (c *Controller) createNWP(nwp *nwkv1.NetworkPolicy, name cache.ObjectName) 
 	var isIngress, isEgress bool
 	if len(nwp.Spec.PolicyTypes) == 0 {
 		isIngress = true // K8s default if no PolicyTypes are present
+		if len(nwp.Spec.Egress) != 0 {
+			isEgress = true
+		}
 	}
 	for _, pt := range nwp.Spec.PolicyTypes {
 		if pt == nwkv1.PolicyTypeEgress {
@@ -413,13 +421,6 @@ func (c *Controller) createNWP(nwp *nwkv1.NetworkPolicy, name cache.ObjectName) 
 			pm.IngressRuleMeta = append(pm.IngressRuleMeta, meta)
 			c.rules[meta] = struct{}{}
 		}
-		c.nftConn.AddRule(&nfds.Rule{
-			Table: c.table,
-			Chain: &ingChain,
-			Exprs: []expr.Any{
-				&expr.Verdict{Kind: expr.VerdictReturn},
-			},
-		})
 		pm.ingressChain = &ingChain
 	}
 	if isEgress {
@@ -440,13 +441,6 @@ func (c *Controller) createNWP(nwp *nwkv1.NetworkPolicy, name cache.ObjectName) 
 			pm.EgressRuleMeta = append(pm.EgressRuleMeta, meta)
 			c.rules[meta] = struct{}{}
 		}
-		c.nftConn.AddRule(&nfds.Rule{
-			Table: c.table,
-			Chain: &egChain,
-			Exprs: []expr.Any{
-				&expr.Verdict{Kind: expr.VerdictReturn},
-			},
-		})
 		pm.egressChain = &egChain
 	}
 

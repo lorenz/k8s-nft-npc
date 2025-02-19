@@ -50,9 +50,9 @@ func FuzzRanges(f *testing.F) {
 			got := trivialRanges{
 				covered: make([]bool, n),
 			}
-			lastEnd := -1
+			lastEnd := -2
 			for it := dut.Iterator(); it.Valid(); it.Next() {
-				if lastEnd >= it.Item().Start {
+				if lastEnd+1 >= it.Item().Start {
 					t.Errorf("Last end %d, next start %d", lastEnd, it.Item().Start)
 				}
 				if it.Item().End < it.Item().Start {

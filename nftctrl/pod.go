@@ -8,8 +8,8 @@ import (
 
 	"git.dolansoft.org/dolansoft/k8s-nft-npc/nfds"
 	"github.com/google/nftables"
-	"github.com/google/nftables/binaryutil"
 	"github.com/google/nftables/expr"
+	"golang.org/x/sys/unix"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/tools/cache"
@@ -21,13 +21,18 @@ type Pod struct {
 	Name       string
 	Labels     labels.Set
 	IPs        []netip.Addr
-	NamedPorts map[string]uint16
+	NamedPorts map[string]NamedPort
 
 	ingressChain, egressChain *nfds.Chain
 
 	ruleRefs map[*Rule]struct{}
 
 	ingressPolicyRefs, egressPolicyRefs map[*Policy]*nfds.Rule
+}
+
+type NamedPort struct {
+	Protocol uint8
+	Port     uint16
 }
 
 func (pm *Pod) vmapElements(chain *nfds.Chain) []nftables.SetElement {
@@ -58,13 +63,12 @@ func (pm *Pod) namedPortElements(nms []RuleNamedPortMeta) []nftables.SetElement 
 	var elems []nftables.SetElement
 	for _, ip := range pm.IPs {
 		for _, nm := range nms {
-			// TODO: Protocols
-			portNum, ok := pm.NamedPorts[nm.PortName]
-			if !ok {
+			port, ok := pm.NamedPorts[nm.PortName]
+			if !ok || port.Protocol != nm.Protocol {
 				continue
 			}
 			elems = append(elems, nftables.SetElement{
-				Key: binary.NativeEndian.AppendUint16(append(ip.AsSlice(), 0, 0, 0, nm.Protocol, 0, 0), portNum),
+				Key: append(append(binary.BigEndian.AppendUint16([]byte{nm.Protocol, 0, 0, 0}, port.Port), 0, 0), ip.AsSlice()...),
 			})
 		}
 	}
@@ -112,17 +116,6 @@ func (c *Controller) addPodNWP(nwp *Policy, pm *Pod) {
 				Table: c.table,
 				Chain: pm.ingressChain,
 				Exprs: []expr.Any{
-					// Accept packets for established or related connections
-					&expr.Ct{Key: expr.CtKeySTATE, Register: newRegOffset + 1},
-					&expr.Bitwise{SourceRegister: newRegOffset + 1, DestRegister: newRegOffset + 1, Len: 4, Mask: binaryutil.NativeEndian.PutUint32(expr.CtStateBitESTABLISHED | expr.CtStateBitRELATED), Xor: binaryutil.NativeEndian.PutUint32(0)},
-					&expr.Cmp{Op: expr.CmpOpNeq, Register: newRegOffset + 1, Data: binaryutil.NativeEndian.PutUint32(0)},
-					&expr.Verdict{Kind: expr.VerdictAccept},
-				},
-			})
-			c.nftConn.AddRule(&nfds.Rule{
-				Table: c.table,
-				Chain: pm.ingressChain,
-				Exprs: []expr.Any{
 					// Reject everything not permitted directly by a network policy or
 					// related to a connection permitted by it.
 					rejectAdministrative(),
@@ -147,17 +140,6 @@ func (c *Controller) addPodNWP(nwp *Policy, pm *Pod) {
 				Name:  fmt.Sprintf("pod_%s_%s_eg", pm.Namespace, pm.Name),
 				Table: c.table,
 				Type:  nftables.ChainTypeFilter,
-			})
-			c.nftConn.AddRule(&nfds.Rule{
-				Table: c.table,
-				Chain: pm.egressChain,
-				Exprs: []expr.Any{
-					// Accept packets for established or related connections
-					&expr.Ct{Key: expr.CtKeySTATE, Register: newRegOffset + 1},
-					&expr.Bitwise{SourceRegister: newRegOffset + 1, DestRegister: newRegOffset + 1, Len: 4, Mask: binaryutil.NativeEndian.PutUint32(expr.CtStateBitESTABLISHED | expr.CtStateBitRELATED), Xor: binaryutil.NativeEndian.PutUint32(0)},
-					&expr.Cmp{Op: expr.CmpOpNeq, Register: newRegOffset + 1, Data: binaryutil.NativeEndian.PutUint32(0)},
-					&expr.Verdict{Kind: expr.VerdictAccept},
-				},
 			})
 			c.nftConn.AddRule(&nfds.Rule{
 				Table: c.table,
@@ -212,11 +194,18 @@ func (c *Controller) removePodNWP(p *Pod, pm *Policy) {
 	}
 }
 
-func (c *Controller) addPodRule(r *Rule, pm *Pod) {
+func (c *Controller) ruleSelectsPod(r *Rule, pm *Pod) bool {
 	for _, sel := range r.PodSelectors {
-		if !sel.Matches(pm, r.Namespace, c.namespaces) {
-			continue
+		if sel.Matches(pm, r.Namespace, c.namespaces) {
+			return true
 		}
+	}
+	// Rules with named ports but no peer restriction select all pods.
+	return len(r.PodSelectors) == 0 && r.NamedPortSet != nil
+}
+
+func (c *Controller) addPodRule(r *Rule, pm *Pod) {
+	if c.ruleSelectsPod(r, pm) {
 		pm.ruleRefs[r] = struct{}{}
 		r.podRefs[pm] = struct{}{}
 		if r.PodIPSet != nil {
@@ -225,8 +214,6 @@ func (c *Controller) addPodRule(r *Rule, pm *Pod) {
 		if r.NamedPortSet != nil {
 			c.nftConn.SetAddElements(r.NamedPortSet, pm.namedPortElements(r.NamedPortMeta))
 		}
-		// Pod got selected by at least one selector, more do not change anything
-		break
 	}
 }
 
@@ -310,31 +297,49 @@ func (c *Controller) normalizePod(pod *corev1.Pod) *Pod {
 		}
 		p.IPs = append(p.IPs, pIP)
 	}
-	p.NamedPorts = make(map[string]uint16)
+	p.NamedPorts = make(map[string]NamedPort)
 	p.ruleRefs = make(map[*Rule]struct{})
 	p.egressPolicyRefs = make(map[*Policy]*nfds.Rule)
 	p.ingressPolicyRefs = make(map[*Policy]*nfds.Rule)
-	for _, container := range pod.Spec.Containers {
-		for _, port := range container.Ports {
-			if port.Name != "" {
-				if port.ContainerPort > math.MaxUint16 {
-					c.eventRecorder.Eventf(pod, corev1.EventTypeWarning, "InvalidPort", "Container %v port %v is out of range, ignore", container.Name, port.ContainerPort)
-					continue
+	for _, containers := range [][]corev1.Container{pod.Spec.Containers, pod.Spec.InitContainers} {
+		for _, container := range containers {
+			for _, port := range container.Ports {
+				if port.Name != "" {
+					if port.ContainerPort > math.MaxUint16 {
+						c.eventRecorder.Eventf(pod, corev1.EventTypeWarning, "InvalidPort", "Container %v port %v is out of range, ignore", container.Name, port.ContainerPort)
+						continue
+					}
+					var proto uint8 = unix.IPPROTO_TCP
+					if port.Protocol != "" {
+						var ok bool
+						proto, ok = parseProtocol(port.Protocol)
+						if !ok {
+							// Ignore unknown protocol without logging. We already log unknown
+							// protocols in policies, and as long as no policy mentions a
+							// protocol, it doesn't matter whether we support it.
+							continue
+						}
+					}
+					p.NamedPorts[port.Name] = NamedPort{
+						Protocol: proto,
+						Port:     uint16(port.ContainerPort),
+					}
 				}
-				p.NamedPorts[port.Name] = uint16(port.ContainerPort)
-			}
-		}
-	}
-	for _, container := range pod.Spec.InitContainers {
-		for _, port := range container.Ports {
-			if port.Name != "" {
-				if port.ContainerPort > math.MaxUint16 {
-					c.eventRecorder.Eventf(pod, corev1.EventTypeWarning, "InvalidPort", "Container %v port %v is out of range, ignore", container.Name, port.ContainerPort)
-					continue
-				}
-				p.NamedPorts[port.Name] = uint16(port.ContainerPort)
 			}
 		}
 	}
 	return &p
+}
+
+func parseProtocol(protocol corev1.Protocol) (proto uint8, ok bool) {
+	switch protocol {
+	case corev1.ProtocolTCP:
+		return unix.IPPROTO_TCP, true
+	case corev1.ProtocolUDP:
+		return unix.IPPROTO_UDP, true
+	case corev1.ProtocolSCTP:
+		return unix.IPPROTO_SCTP, true
+	default:
+		return 0, false
+	}
 }

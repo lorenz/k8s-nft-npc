@@ -24,6 +24,10 @@ func (r Ranges[T]) assertValid(a Range[T]) {
 	}
 }
 
+func (r Ranges[T]) lessWithGap(a, b T) bool {
+	return r.less(a, b) && r.less(r.closest(a, false), b)
+}
+
 func defaultCompare[T constraints.Integer](a, b T) bool {
 	return a < b
 }
@@ -109,15 +113,14 @@ func (r *Ranges[T]) Add(a Range[T]) {
 			return
 		}
 
-		if !r.less(it.Value(), a.Start) { // TODO: exact adjacency not getting joined
+		if !r.lessWithGap(it.Value(), a.Start) {
 			// Extend new range to replace adjacent/overlapping existing range
 			a.Start = it.Key()
-			keysToRemove = append(keysToRemove, it.Key())
 		}
 		it.Next()
 	}
 	for ; it.Valid(); it.Next() {
-		if r.less(a.End, it.Key()) { // TODO: exact adjacency not getting joined
+		if r.lessWithGap(a.End, it.Key()) {
 			// End of new range doesn't touch next start, we're done
 			break
 		}

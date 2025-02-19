@@ -7,6 +7,7 @@ toolchain go1.23.3
 require (
 	github.com/google/nftables v0.2.0
 	github.com/igrmk/treemap/v2 v2.0.1
+	github.com/mdlayher/netlink v1.7.2
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba
 	golang.org/x/exp v0.0.0-20220317015231-48e79f11773a
 	golang.org/x/sys v0.26.0
@@ -37,7 +38,6 @@ require (
 	github.com/josharian/native v1.1.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
-	github.com/mdlayher/netlink v1.7.2 // indirect
 	github.com/mdlayher/socket v0.5.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
