@@ -18,7 +18,7 @@ import (
 
 type Pod struct {
 	Namespace  string
-	Name       string
+	ID         string
 	Labels     labels.Set
 	IPs        []netip.Addr
 	NamedPorts map[string]NamedPort
@@ -76,7 +76,7 @@ func (pm *Pod) namedPortElements(nms []RuleNamedPortMeta) []nftables.SetElement 
 }
 
 func (pm *Pod) SemanticallyEqual(pm2 *Pod) bool {
-	if pm.Namespace != pm2.Namespace || pm.Name != pm2.Name || len(pm.Labels) != len(pm2.Labels) || len(pm.IPs) != len(pm2.IPs) || len(pm.NamedPorts) != len(pm2.NamedPorts) {
+	if pm.Namespace != pm2.Namespace || pm.ID != pm2.ID || len(pm.Labels) != len(pm2.Labels) || len(pm.IPs) != len(pm2.IPs) || len(pm.NamedPorts) != len(pm2.NamedPorts) {
 		return false
 	}
 	for k, v1 := range pm.Labels {
@@ -108,7 +108,7 @@ func (c *Controller) addPodNWP(nwp *Policy, pm *Pod) {
 	if nwp.ingressChain != nil {
 		if pm.ingressChain == nil {
 			pm.ingressChain = c.nftConn.AddChain(&nfds.Chain{
-				Name:  fmt.Sprintf("pod_%s_%s_ing", pm.Namespace, pm.Name),
+				Name:  fmt.Sprintf("pod_%s_ing", pm.ID),
 				Table: c.table,
 				Type:  nftables.ChainTypeFilter,
 			})
@@ -137,7 +137,7 @@ func (c *Controller) addPodNWP(nwp *Policy, pm *Pod) {
 	if nwp.egressChain != nil {
 		if pm.egressChain == nil {
 			pm.egressChain = c.nftConn.AddChain(&nfds.Chain{
-				Name:  fmt.Sprintf("pod_%s_%s_eg", pm.Namespace, pm.Name),
+				Name:  fmt.Sprintf("pod_%s_eg", pm.ID),
 				Table: c.table,
 				Type:  nftables.ChainTypeFilter,
 			})
@@ -284,7 +284,7 @@ func (c *Controller) SetPod(name cache.ObjectName, pod *corev1.Pod) {
 func (c *Controller) normalizePod(pod *corev1.Pod) *Pod {
 	var p Pod
 	p.Namespace = pod.Namespace
-	p.Name = pod.Name
+	p.ID = objectID(&pod.ObjectMeta)
 	p.Labels = pod.Labels
 	for _, ip := range pod.Status.PodIPs {
 		if pod.Status.Phase != corev1.PodRunning && pod.Status.Phase != corev1.PodPending {
@@ -292,7 +292,7 @@ func (c *Controller) normalizePod(pod *corev1.Pod) *Pod {
 		}
 		pIP, err := netip.ParseAddr(ip.IP)
 		if err != nil {
-			klog.Warningf("Failed to parse IP %q of pod %q: %v", ip.IP, p.Name, err)
+			klog.Warningf("Failed to parse IP %q of pod %q: %v", ip.IP, p.ID, err)
 			continue
 		}
 		p.IPs = append(p.IPs, pIP)

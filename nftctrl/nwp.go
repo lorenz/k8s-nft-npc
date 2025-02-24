@@ -23,7 +23,7 @@ import (
 
 type Policy struct {
 	Namespace       string
-	Name            string
+	ID              string
 	PodSelector     labels.Selector
 	IngressRuleMeta []*Rule
 	EgressRuleMeta  []*Rule
@@ -382,7 +382,7 @@ func (c *Controller) createNWP(nwp *nwkv1.NetworkPolicy, name cache.ObjectName) 
 	var pm Policy
 	var err error
 	pm.Namespace = nwp.Namespace
-	pm.Name = nwp.Name
+	pm.ID = objectID(&nwp.ObjectMeta)
 	pm.PodSelector, err = metav1.LabelSelectorAsSelector(&nwp.Spec.PodSelector)
 	if err != nil {
 		return nil, fmt.Errorf("bad PodSelector: %w", err)
@@ -408,11 +408,11 @@ func (c *Controller) createNWP(nwp *nwkv1.NetworkPolicy, name cache.ObjectName) 
 		ingChain := nfds.Chain{
 			Table: c.table,
 			Type:  nftables.ChainTypeFilter,
-			Name:  fmt.Sprintf("pol_%v_%v_ing", pm.Namespace, pm.Name),
+			Name:  fmt.Sprintf("pol_%s_ing", pm.ID),
 		}
 		c.nftConn.AddChain(&ingChain)
 		for i, ingRule := range nwp.Spec.Ingress {
-			meta, err := c.createPeers(&ingChain, ingRule.From, ingRule.Ports, fmt.Sprintf("%v_%d", ingChain.Name, i), dirIngress, nwp)
+			meta, err := c.createPeers(&ingChain, ingRule.From, ingRule.Ports, fmt.Sprintf("%s_%d", ingChain.Name, i), dirIngress, nwp)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create ingress peer rules: %w", err)
 			}
@@ -428,11 +428,11 @@ func (c *Controller) createNWP(nwp *nwkv1.NetworkPolicy, name cache.ObjectName) 
 		egChain := nfds.Chain{
 			Table: c.table,
 			Type:  nftables.ChainTypeFilter,
-			Name:  fmt.Sprintf("pol_%v_%v_eg", pm.Namespace, pm.Name),
+			Name:  fmt.Sprintf("pol_%s_eg", pm.ID),
 		}
 		c.nftConn.AddChain(&egChain)
 		for i, egRule := range nwp.Spec.Egress {
-			meta, err := c.createPeers(&egChain, egRule.To, egRule.Ports, fmt.Sprintf("%v_%d", egChain.Name, i), dirEgress, nwp)
+			meta, err := c.createPeers(&egChain, egRule.To, egRule.Ports, fmt.Sprintf("%s_%d", egChain.Name, i), dirEgress, nwp)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create egress peer rules: %w", err)
 			}

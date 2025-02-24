@@ -1,6 +1,7 @@
 package nftctrl
 
 import (
+	"fmt"
 	"net/netip"
 
 	"git.dolansoft.org/dolansoft/k8s-nft-npc/nfds"
@@ -10,6 +11,7 @@ import (
 	"github.com/google/nftables/expr"
 	"github.com/mdlayher/netlink"
 	"go4.org/netipx"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
@@ -229,4 +231,16 @@ func closest(a netip.Addr, before bool) netip.Addr {
 		panic("bad closest ip")
 	}
 	return out
+}
+
+// objectID returns an identifier for a Kubernetes object which can be used as
+// part of the name of an nftables chain or set.
+func objectID(obj *metav1.ObjectMeta) string {
+	if len(obj.Namespace)+1+len(obj.Name) > 128 {
+		// If the combined length of namespace and name is longer than 128 bytes,
+		// use the object UID instead. nftables names are limited to 256 characters,
+		// and this limit could otherwise be exceeded.
+		return string(obj.UID)
+	}
+	return fmt.Sprintf("%s_%s", obj.Namespace, obj.Name)
 }
