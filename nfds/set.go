@@ -103,30 +103,31 @@ func (cc *Conn) DelSet(s *Set) {
 }
 
 func (cc *Conn) splitVals(s *Set, vals []nftables.SetElement) (vals4, vals6 []nftables.SetElement, err error) {
-	keySep := s.KeyType6.Bytes != s.KeyType.Bytes
-	dataSep := s.DataType.Bytes != s.DataType6.Bytes
-	if !keySep && !dataSep {
+	switch {
+	case s.KeyType6.Bytes != s.KeyType.Bytes:
+		for _, val := range vals {
+			switch len(val.Key) {
+			case int(s.KeyType6.Bytes):
+				vals6 = append(vals6, val)
+			case int(s.KeyType.Bytes):
+				vals4 = append(vals4, val)
+			default:
+				panic("bad length, fix me later")
+			}
+		}
+	case s.DataType.Bytes != s.DataType6.Bytes:
+		for _, val := range vals {
+			switch len(val.Val) {
+			case int(s.DataType6.Bytes):
+				vals6 = append(vals6, val)
+			case int(s.DataType.Bytes):
+				vals4 = append(vals4, val)
+			default:
+				panic("bad length, fix me later")
+			}
+		}
+	default:
 		return vals, vals, nil
-	}
-	for _, val := range vals {
-		if keySep {
-			if len(val.Key) == int(s.KeyType6.Bytes) {
-				vals6 = append(vals6, val)
-			} else if len(val.Key) == int(s.KeyType.Bytes) {
-				vals4 = append(vals4, val)
-			} else {
-				panic("bad length, fix me later")
-			}
-		}
-		if dataSep {
-			if len(val.Val) == int(s.DataType6.Bytes) {
-				vals6 = append(vals6, val)
-			} else if len(val.Val) == int(s.DataType.Bytes) {
-				vals4 = append(vals4, val)
-			} else {
-				panic("bad length, fix me later")
-			}
-		}
 	}
 	return vals4, vals6, nil
 }
@@ -144,34 +145,9 @@ func (cc *Conn) SetAddElements(s *Set, vals []nftables.SetElement) error {
 }
 
 func (cc *Conn) SetDeleteElements(s *Set, vals []nftables.SetElement) error {
-	keySep := s.KeyType6.Bytes != s.KeyType.Bytes
-	dataSep := s.DataType.Bytes != s.DataType6.Bytes
-	if !keySep && !dataSep {
-		if err := cc.c.SetDeleteElements(s.v4, vals); err != nil {
-			return err
-		}
-		return cc.c.SetDeleteElements(s.v6, vals)
-	}
-	var vals4, vals6 []nftables.SetElement
-	for _, val := range vals {
-		if keySep {
-			if len(val.Key) == int(s.KeyType6.Bytes) {
-				vals6 = append(vals6, val)
-			} else if len(val.Key) == int(s.KeyType.Bytes) {
-				vals4 = append(vals4, val)
-			} else {
-				panic("bad length, fix me later")
-			}
-		}
-		if dataSep {
-			if len(val.Val) == int(s.DataType6.Bytes) {
-				vals6 = append(vals6, val)
-			} else if len(val.Val) == int(s.DataType.Bytes) {
-				vals4 = append(vals4, val)
-			} else {
-				panic("bad length, fix me later")
-			}
-		}
+	vals4, vals6, err := cc.splitVals(s, vals)
+	if err != nil {
+		return err
 	}
 	if err := cc.c.SetDeleteElements(s.v4, vals4); err != nil {
 		return err
