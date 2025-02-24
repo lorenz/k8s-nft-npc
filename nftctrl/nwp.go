@@ -64,14 +64,15 @@ type PodSelector struct {
 }
 
 func (sel PodSelector) Matches(pm *Pod, selNs string, namespaces map[string]*Namespace) bool {
-	if sel.NamespaceSelector == labels.Nothing() && selNs != pm.Namespace {
-		return false
-	}
-	if namespaces[pm.Namespace] == nil {
-		return false
-	}
-	if sel.NamespaceSelector != labels.Nothing() && !sel.NamespaceSelector.Matches(namespaces[pm.Namespace].Labels) {
-		return false
+	if sel.NamespaceSelector == labels.Nothing() {
+		if selNs != pm.Namespace {
+			return false
+		}
+	} else {
+		ns, ok := namespaces[pm.Namespace]
+		if !ok || !sel.NamespaceSelector.Matches(ns.Labels) {
+			return false
+		}
 	}
 	if !sel.PodSelector.Matches(pm.Labels) {
 		return false
