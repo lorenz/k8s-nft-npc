@@ -63,18 +63,18 @@ type PodSelector struct {
 	PodSelector       labels.Selector
 }
 
-func (sel PodSelector) Matches(pm *Pod, selNs string, namespaces map[string]*Namespace) bool {
+func (sel PodSelector) Matches(p *Pod, selNs string, namespaces map[string]*Namespace) bool {
 	if sel.NamespaceSelector == labels.Nothing() {
-		if selNs != pm.Namespace {
+		if selNs != p.Namespace {
 			return false
 		}
 	} else {
-		ns, ok := namespaces[pm.Namespace]
+		ns, ok := namespaces[p.Namespace]
 		if !ok || !sel.NamespaceSelector.Matches(ns.Labels) {
 			return false
 		}
 	}
-	if !sel.PodSelector.Matches(pm.Labels) {
+	if !sel.PodSelector.Matches(p.Labels) {
 		return false
 	}
 	return true
@@ -378,25 +378,25 @@ func (c *Controller) createPeers(ch *nfds.Chain, peers []nwkv1.NetworkPolicyPeer
 	return &meta
 }
 
-func (c *Controller) createNWP(nwp *nwkv1.NetworkPolicy, name cache.ObjectName) {
-	var pm Policy
+func (c *Controller) createNWP(name cache.ObjectName, policy *nwkv1.NetworkPolicy) {
+	var nwp Policy
 	var err error
-	pm.Namespace = nwp.Namespace
-	pm.ID = objectID(&nwp.ObjectMeta)
-	pm.PodSelector, err = metav1.LabelSelectorAsSelector(&nwp.Spec.PodSelector)
+	nwp.Namespace = policy.Namespace
+	nwp.ID = objectID(&policy.ObjectMeta)
+	nwp.PodSelector, err = metav1.LabelSelectorAsSelector(&policy.Spec.PodSelector)
 	if err != nil {
-		c.eventRecorder.Eventf(nwp, corev1.EventTypeWarning, "InvalidPolicy", "podSelector invalid: %v", err)
+		c.eventRecorder.Eventf(policy, corev1.EventTypeWarning, "InvalidPolicy", "podSelector invalid: %v", err)
 		return
 	}
 
 	var isIngress, isEgress bool
-	if len(nwp.Spec.PolicyTypes) == 0 {
+	if len(policy.Spec.PolicyTypes) == 0 {
 		isIngress = true // K8s default if no PolicyTypes are present
-		if len(nwp.Spec.Egress) != 0 {
+		if len(policy.Spec.Egress) != 0 {
 			isEgress = true
 		}
 	}
-	for _, pt := range nwp.Spec.PolicyTypes {
+	for _, pt := range policy.Spec.PolicyTypes {
 		if pt == nwkv1.PolicyTypeEgress {
 			isEgress = true
 		}
@@ -409,42 +409,42 @@ func (c *Controller) createNWP(nwp *nwkv1.NetworkPolicy, name cache.ObjectName) 
 		ingChain := nfds.Chain{
 			Table: c.table,
 			Type:  nftables.ChainTypeFilter,
-			Name:  fmt.Sprintf("pol_%s_ing", pm.ID),
+			Name:  fmt.Sprintf("pol_%s_ing", nwp.ID),
 		}
 		c.nftConn.AddChain(&ingChain)
-		for i, ingRule := range nwp.Spec.Ingress {
-			meta := c.createPeers(&ingChain, ingRule.From, ingRule.Ports, fmt.Sprintf("%s_%d", ingChain.Name, i), dirIngress, nwp)
+		for i, ingRule := range policy.Spec.Ingress {
+			meta := c.createPeers(&ingChain, ingRule.From, ingRule.Ports, fmt.Sprintf("%s_%d", ingChain.Name, i), dirIngress, policy)
 			for _, pod := range c.pods {
 				c.addPodRule(meta, pod)
 			}
-			pm.IngressRuleMeta = append(pm.IngressRuleMeta, meta)
+			nwp.IngressRuleMeta = append(nwp.IngressRuleMeta, meta)
 			c.rules[meta] = struct{}{}
 		}
-		pm.ingressChain = &ingChain
+		nwp.ingressChain = &ingChain
 	}
 	if isEgress {
 		egChain := nfds.Chain{
 			Table: c.table,
 			Type:  nftables.ChainTypeFilter,
-			Name:  fmt.Sprintf("pol_%s_eg", pm.ID),
+			Name:  fmt.Sprintf("pol_%s_eg", nwp.ID),
 		}
 		c.nftConn.AddChain(&egChain)
-		for i, egRule := range nwp.Spec.Egress {
-			meta := c.createPeers(&egChain, egRule.To, egRule.Ports, fmt.Sprintf("%s_%d", egChain.Name, i), dirEgress, nwp)
+		for i, egRule := range policy.Spec.Egress {
+			meta := c.createPeers(&egChain, egRule.To, egRule.Ports, fmt.Sprintf("%s_%d", egChain.Name, i), dirEgress, policy)
 			for _, pod := range c.pods {
 				c.addPodRule(meta, pod)
 			}
-			pm.EgressRuleMeta = append(pm.EgressRuleMeta, meta)
+			nwp.EgressRuleMeta = append(nwp.EgressRuleMeta, meta)
 			c.rules[meta] = struct{}{}
 		}
-		pm.egressChain = &egChain
+		nwp.egressChain = &egChain
 	}
 
-	pm.podRefs = make(map[*Pod]struct{})
+	nwp.podRefs = make(map[*Pod]struct{})
 	for _, pod := range c.pods {
-		c.addPodNWP(&pm, pod)
+		c.addPodNWP(pod, &nwp)
 	}
-	c.nwps[name] = &pm
+	c.nwps[name] = &nwp
 }
 
 func (c *Controller) deleteRules(rm []*Rule) {
@@ -462,18 +462,18 @@ func (c *Controller) deleteRules(rm []*Rule) {
 	}
 }
 
-func (c *Controller) deleteNWP(pm *Policy, name cache.ObjectName) {
-	for p := range pm.podRefs {
-		c.removePodNWP(p, pm)
+func (c *Controller) deleteNWP(name cache.ObjectName, nwp *Policy) {
+	for p := range nwp.podRefs {
+		c.removePodNWP(p, nwp)
 	}
-	if pm.ingressChain != nil {
-		c.nftConn.DelChain(pm.ingressChain)
+	if nwp.ingressChain != nil {
+		c.nftConn.DelChain(nwp.ingressChain)
 	}
-	if pm.egressChain != nil {
-		c.nftConn.DelChain(pm.egressChain)
+	if nwp.egressChain != nil {
+		c.nftConn.DelChain(nwp.egressChain)
 	}
-	c.deleteRules(pm.IngressRuleMeta)
-	c.deleteRules(pm.EgressRuleMeta)
+	c.deleteRules(nwp.IngressRuleMeta)
+	c.deleteRules(nwp.EgressRuleMeta)
 	delete(c.nwps, name)
 }
 
@@ -481,15 +481,15 @@ func (c *Controller) SetNetworkPolicy(name cache.ObjectName, nwp *nwkv1.NetworkP
 	syncedNWP := c.nwps[name]
 	switch {
 	case syncedNWP == nil && nwp != nil:
-		c.createNWP(nwp, name)
+		c.createNWP(name, nwp)
 	case syncedNWP != nil && nwp == nil:
 		// Delete NWP
-		c.deleteNWP(syncedNWP, name)
+		c.deleteNWP(name, syncedNWP)
 	case syncedNWP != nil && nwp != nil:
 		// Update NWP
 		// TODO: Figure out if update is meaningful
-		c.deleteNWP(syncedNWP, name)
-		c.createNWP(nwp, name)
+		c.deleteNWP(name, syncedNWP)
+		c.createNWP(name, nwp)
 	case syncedNWP == nil && nwp == nil:
 		// Nothing to do
 	}

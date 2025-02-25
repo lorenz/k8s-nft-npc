@@ -58,26 +58,26 @@ func (c *Controller) updateNS(old, new *Namespace) {
 	}
 }
 
-func (c *Controller) reevalPodInRule(pm *Pod, r *Rule) {
-	isSelected := c.ruleSelectsPod(r, pm)
-	_, wasSelected := r.podRefs[pm]
+func (c *Controller) reevalPodInRule(p *Pod, r *Rule) {
+	isSelected := c.ruleSelectsPod(r, p)
+	_, wasSelected := r.podRefs[p]
 	if isSelected && !wasSelected {
-		pm.ruleRefs[r] = struct{}{}
-		r.podRefs[pm] = struct{}{}
+		p.ruleRefs[r] = struct{}{}
+		r.podRefs[p] = struct{}{}
 		if r.PodIPSet != nil {
-			c.nftConn.SetAddElements(r.PodIPSet, pm.ipElements())
+			c.nftConn.SetAddElements(r.PodIPSet, p.ipElements())
 		}
 		if r.NamedPortSet != nil {
-			c.nftConn.SetAddElements(r.NamedPortSet, pm.namedPortElements(r.NamedPortMeta))
+			c.nftConn.SetAddElements(r.NamedPortSet, p.namedPortElements(r.NamedPortMeta))
 		}
 	} else if !isSelected && wasSelected {
-		delete(r.podRefs, pm)
-		delete(pm.ruleRefs, r)
+		delete(r.podRefs, p)
+		delete(p.ruleRefs, r)
 		if r.PodIPSet != nil {
-			c.nftConn.SetDeleteElements(r.PodIPSet, pm.ipElements())
+			c.nftConn.SetDeleteElements(r.PodIPSet, p.ipElements())
 		}
 		if r.NamedPortSet != nil {
-			c.nftConn.SetDeleteElements(r.NamedPortSet, pm.namedPortElements(r.NamedPortMeta))
+			c.nftConn.SetDeleteElements(r.NamedPortSet, p.namedPortElements(r.NamedPortMeta))
 		}
 	}
 }

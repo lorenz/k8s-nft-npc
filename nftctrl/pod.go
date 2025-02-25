@@ -35,9 +35,9 @@ type NamedPort struct {
 	Port     uint16
 }
 
-func (pm *Pod) vmapElements(chain *nfds.Chain) []nftables.SetElement {
+func (p *Pod) vmapElements(chain *nfds.Chain) []nftables.SetElement {
 	var elems []nftables.SetElement
-	for _, ip := range pm.IPs {
+	for _, ip := range p.IPs {
 		elems = append(elems, nftables.SetElement{
 			Key: ip.AsSlice(),
 			VerdictData: &expr.Verdict{
@@ -49,9 +49,9 @@ func (pm *Pod) vmapElements(chain *nfds.Chain) []nftables.SetElement {
 	return elems
 }
 
-func (pm *Pod) ipElements() []nftables.SetElement {
+func (p *Pod) ipElements() []nftables.SetElement {
 	var elems []nftables.SetElement
-	for _, ip := range pm.IPs {
+	for _, ip := range p.IPs {
 		elems = append(elems, nftables.SetElement{
 			Key: ip.AsSlice(),
 		})
@@ -59,11 +59,11 @@ func (pm *Pod) ipElements() []nftables.SetElement {
 	return elems
 }
 
-func (pm *Pod) namedPortElements(nms []RuleNamedPortMeta) []nftables.SetElement {
+func (p *Pod) namedPortElements(nms []RuleNamedPortMeta) []nftables.SetElement {
 	var elems []nftables.SetElement
-	for _, ip := range pm.IPs {
+	for _, ip := range p.IPs {
 		for _, nm := range nms {
-			port, ok := pm.NamedPorts[nm.PortName]
+			port, ok := p.NamedPorts[nm.PortName]
 			if !ok || port.Protocol != nm.Protocol {
 				continue
 			}
@@ -75,25 +75,25 @@ func (pm *Pod) namedPortElements(nms []RuleNamedPortMeta) []nftables.SetElement 
 	return elems
 }
 
-func (pm *Pod) SemanticallyEqual(pm2 *Pod) bool {
-	if pm.Namespace != pm2.Namespace || pm.ID != pm2.ID || len(pm.Labels) != len(pm2.Labels) || len(pm.IPs) != len(pm2.IPs) || len(pm.NamedPorts) != len(pm2.NamedPorts) {
+func (p *Pod) SemanticallyEqual(p2 *Pod) bool {
+	if p.Namespace != p2.Namespace || p.ID != p2.ID || len(p.Labels) != len(p2.Labels) || len(p.IPs) != len(p2.IPs) || len(p.NamedPorts) != len(p2.NamedPorts) {
 		return false
 	}
-	for k, v1 := range pm.Labels {
-		if v2, ok := pm2.Labels[k]; !ok || v1 != v2 {
+	for k, v1 := range p.Labels {
+		if v2, ok := p2.Labels[k]; !ok || v1 != v2 {
 			return false
 		}
 	}
-	for n, p := range pm.NamedPorts {
-		if p2, ok := pm2.NamedPorts[n]; !ok || p2 != p {
+	for n, p := range p.NamedPorts {
+		if p2, ok := p2.NamedPorts[n]; !ok || p2 != p {
 			return false
 		}
 	}
 	ipSet := make(map[netip.Addr]struct{})
-	for _, ip := range pm2.IPs {
+	for _, ip := range p2.IPs {
 		ipSet[ip] = struct{}{}
 	}
-	for _, ip := range pm.IPs {
+	for _, ip := range p.IPs {
 		if _, ok := ipSet[ip]; !ok {
 			return false
 		}
@@ -101,49 +101,49 @@ func (pm *Pod) SemanticallyEqual(pm2 *Pod) bool {
 	return true
 }
 
-func (c *Controller) addPodNWP(nwp *Policy, pm *Pod) {
-	if nwp.Namespace != pm.Namespace || !nwp.PodSelector.Matches(pm.Labels) {
+func (c *Controller) addPodNWP(p *Pod, nwp *Policy) {
+	if nwp.Namespace != p.Namespace || !nwp.PodSelector.Matches(p.Labels) {
 		return
 	}
 	if nwp.ingressChain != nil {
-		if pm.ingressChain == nil {
-			pm.ingressChain = c.nftConn.AddChain(&nfds.Chain{
-				Name:  fmt.Sprintf("pod_%s_ing", pm.ID),
+		if p.ingressChain == nil {
+			p.ingressChain = c.nftConn.AddChain(&nfds.Chain{
+				Name:  fmt.Sprintf("pod_%s_ing", p.ID),
 				Table: c.table,
 				Type:  nftables.ChainTypeFilter,
 			})
 			c.nftConn.AddRule(&nfds.Rule{
 				Table: c.table,
-				Chain: pm.ingressChain,
+				Chain: p.ingressChain,
 				Exprs: []expr.Any{
 					// Reject everything not permitted directly by a network policy or
 					// related to a connection permitted by it.
 					rejectAdministrative(),
 				},
 			})
-			if err := c.nftConn.SetAddElements(c.vmapIng, pm.vmapElements(pm.ingressChain)); err != nil {
+			if err := c.nftConn.SetAddElements(c.vmapIng, p.vmapElements(p.ingressChain)); err != nil {
 				panic(err)
 			}
 		}
-		pm.ingressPolicyRefs[nwp] = c.nftConn.InsertRule(&nfds.Rule{
+		p.ingressPolicyRefs[nwp] = c.nftConn.InsertRule(&nfds.Rule{
 			Table: c.table,
-			Chain: pm.ingressChain,
+			Chain: p.ingressChain,
 			Exprs: []expr.Any{
 				&expr.Verdict{Kind: expr.VerdictJump, Chain: nwp.ingressChain.Name},
 			},
 		})
-		nwp.podRefs[pm] = struct{}{}
+		nwp.podRefs[p] = struct{}{}
 	}
 	if nwp.egressChain != nil {
-		if pm.egressChain == nil {
-			pm.egressChain = c.nftConn.AddChain(&nfds.Chain{
-				Name:  fmt.Sprintf("pod_%s_eg", pm.ID),
+		if p.egressChain == nil {
+			p.egressChain = c.nftConn.AddChain(&nfds.Chain{
+				Name:  fmt.Sprintf("pod_%s_eg", p.ID),
 				Table: c.table,
 				Type:  nftables.ChainTypeFilter,
 			})
 			c.nftConn.AddRule(&nfds.Rule{
 				Table: c.table,
-				Chain: pm.egressChain,
+				Chain: p.egressChain,
 				Exprs: []expr.Any{
 					// Reject everything not permitted directly by a network policy or
 					// related to a connection permitted by it.
@@ -151,28 +151,28 @@ func (c *Controller) addPodNWP(nwp *Policy, pm *Pod) {
 				},
 			})
 
-			if err := c.nftConn.SetAddElements(c.vmapEg, pm.vmapElements(pm.egressChain)); err != nil {
+			if err := c.nftConn.SetAddElements(c.vmapEg, p.vmapElements(p.egressChain)); err != nil {
 				panic(err)
 			}
 		}
-		pm.egressPolicyRefs[nwp] = c.nftConn.InsertRule(&nfds.Rule{
+		p.egressPolicyRefs[nwp] = c.nftConn.InsertRule(&nfds.Rule{
 			Table: c.table,
-			Chain: pm.egressChain,
+			Chain: p.egressChain,
 			Exprs: []expr.Any{
 				&expr.Verdict{Kind: expr.VerdictJump, Chain: nwp.egressChain.Name},
 			},
 		})
-		nwp.podRefs[pm] = struct{}{}
+		nwp.podRefs[p] = struct{}{}
 	}
 }
 
-func (c *Controller) removePodNWP(p *Pod, pm *Policy) {
-	r, ok := p.ingressPolicyRefs[pm]
+func (c *Controller) removePodNWP(p *Pod, nwp *Policy) {
+	r, ok := p.ingressPolicyRefs[nwp]
 	if r != nil {
 		c.nftConn.DelRule(r)
 	}
 	if ok {
-		delete(p.ingressPolicyRefs, pm)
+		delete(p.ingressPolicyRefs, nwp)
 	}
 	if len(p.ingressPolicyRefs) == 0 && p.ingressChain != nil {
 		c.nftConn.SetDeleteElements(c.vmapIng, p.vmapElements(p.ingressChain))
@@ -180,12 +180,12 @@ func (c *Controller) removePodNWP(p *Pod, pm *Policy) {
 		p.ingressChain = nil
 	}
 
-	r, ok = p.egressPolicyRefs[pm]
+	r, ok = p.egressPolicyRefs[nwp]
 	if r != nil {
 		c.nftConn.DelRule(r)
 	}
 	if ok {
-		delete(p.egressPolicyRefs, pm)
+		delete(p.egressPolicyRefs, nwp)
 	}
 	if len(p.egressPolicyRefs) == 0 && p.egressChain != nil {
 		c.nftConn.SetDeleteElements(c.vmapEg, p.vmapElements(p.egressChain))
@@ -194,9 +194,9 @@ func (c *Controller) removePodNWP(p *Pod, pm *Policy) {
 	}
 }
 
-func (c *Controller) ruleSelectsPod(r *Rule, pm *Pod) bool {
+func (c *Controller) ruleSelectsPod(r *Rule, p *Pod) bool {
 	for _, sel := range r.PodSelectors {
-		if sel.Matches(pm, r.Namespace, c.namespaces) {
+		if sel.Matches(p, r.Namespace, c.namespaces) {
 			return true
 		}
 	}
@@ -204,42 +204,42 @@ func (c *Controller) ruleSelectsPod(r *Rule, pm *Pod) bool {
 	return len(r.PodSelectors) == 0 && r.NamedPortSet != nil
 }
 
-func (c *Controller) addPodRule(r *Rule, pm *Pod) {
-	if c.ruleSelectsPod(r, pm) {
-		pm.ruleRefs[r] = struct{}{}
-		r.podRefs[pm] = struct{}{}
+func (c *Controller) addPodRule(r *Rule, p *Pod) {
+	if c.ruleSelectsPod(r, p) {
+		p.ruleRefs[r] = struct{}{}
+		r.podRefs[p] = struct{}{}
 		if r.PodIPSet != nil {
-			c.nftConn.SetAddElements(r.PodIPSet, pm.ipElements())
+			c.nftConn.SetAddElements(r.PodIPSet, p.ipElements())
 		}
 		if r.NamedPortSet != nil {
-			c.nftConn.SetAddElements(r.NamedPortSet, pm.namedPortElements(r.NamedPortMeta))
+			c.nftConn.SetAddElements(r.NamedPortSet, p.namedPortElements(r.NamedPortMeta))
 		}
 	}
 }
 
-func (c *Controller) deletePod(pm *Pod) {
-	if pm.ingressChain != nil {
-		c.nftConn.SetDeleteElements(c.vmapIng, pm.vmapElements(pm.ingressChain))
-		c.nftConn.DelChain(pm.ingressChain)
+func (c *Controller) deletePod(p *Pod) {
+	if p.ingressChain != nil {
+		c.nftConn.SetDeleteElements(c.vmapIng, p.vmapElements(p.ingressChain))
+		c.nftConn.DelChain(p.ingressChain)
 	}
-	for p := range pm.ingressPolicyRefs {
-		delete(p.podRefs, pm)
+	for nwp := range p.ingressPolicyRefs {
+		delete(nwp.podRefs, p)
 	}
 
-	if pm.egressChain != nil {
-		c.nftConn.SetDeleteElements(c.vmapEg, pm.vmapElements(pm.egressChain))
-		c.nftConn.DelChain(pm.egressChain)
+	if p.egressChain != nil {
+		c.nftConn.SetDeleteElements(c.vmapEg, p.vmapElements(p.egressChain))
+		c.nftConn.DelChain(p.egressChain)
 	}
-	for p := range pm.egressPolicyRefs {
-		delete(p.podRefs, pm)
+	for nwp := range p.egressPolicyRefs {
+		delete(nwp.podRefs, p)
 	}
-	for r := range pm.ruleRefs {
-		delete(r.podRefs, pm)
+	for r := range p.ruleRefs {
+		delete(r.podRefs, p)
 		if r.PodIPSet != nil {
-			c.nftConn.SetDeleteElements(r.PodIPSet, pm.ipElements())
+			c.nftConn.SetDeleteElements(r.PodIPSet, p.ipElements())
 		}
 		if r.NamedPortSet != nil {
-			c.nftConn.SetDeleteElements(r.NamedPortSet, pm.namedPortElements(r.NamedPortMeta))
+			c.nftConn.SetDeleteElements(r.NamedPortSet, p.namedPortElements(r.NamedPortMeta))
 		}
 	}
 }
@@ -248,33 +248,33 @@ func (c *Controller) SetPod(name cache.ObjectName, pod *corev1.Pod) {
 	syncedPod := c.pods[name]
 	switch {
 	case syncedPod == nil && pod != nil:
-		np := c.normalizePod(pod)
+		p := c.normalizePod(pod)
 		for _, nwp := range c.nwps {
-			c.addPodNWP(nwp, np)
+			c.addPodNWP(p, nwp)
 		}
 		for r := range c.rules {
-			c.addPodRule(r, np)
+			c.addPodRule(r, p)
 		}
-		c.pods[name] = np
+		c.pods[name] = p
 	case syncedPod != nil && pod == nil:
 		c.deletePod(syncedPod)
 		delete(c.pods, name)
 	case syncedPod != nil && pod != nil:
 		// Update Pod
-		np := c.normalizePod(pod)
-		if np.SemanticallyEqual(syncedPod) {
+		p := c.normalizePod(pod)
+		if p.SemanticallyEqual(syncedPod) {
 			return // Nothing to do
 		}
 		// Recreate, we curently cannot intelligently update
 		c.deletePod(syncedPod)
 		delete(c.pods, name)
 		for _, nwp := range c.nwps {
-			c.addPodNWP(nwp, np)
+			c.addPodNWP(p, nwp)
 		}
 		for r := range c.rules {
-			c.addPodRule(r, np)
+			c.addPodRule(r, p)
 		}
-		c.pods[name] = np
+		c.pods[name] = p
 	case syncedPod == nil && pod == nil:
 		// Nothing to do
 	}
