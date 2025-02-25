@@ -65,7 +65,8 @@ func (cc *Conn) InsertRule(r *Rule) *Rule {
 }
 
 func (cc *Conn) DelRule(r *Rule) error {
-	cc.c.DelRule(r.v4)
-	cc.c.DelRule(r.v6)
-	return nil
+	if err := cc.c.DelRule(r.v4); err != nil {
+		return err
+	}
+	return cc.c.DelRule(r.v6)
 }

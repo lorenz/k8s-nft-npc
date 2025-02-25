@@ -86,10 +86,7 @@ func (cc *Conn) AddSet(s *Set, elems []nftables.SetElement) error {
 	} else {
 		s.v6.DataType = s.DataType6
 	}
-	vals4, vals6, err := cc.splitVals(s, elems)
-	if err != nil {
-		return err
-	}
+	vals4, vals6 := cc.splitVals(s, elems)
 	if err := cc.c.AddSet(s.v4, vals4); err != nil {
 		return err
 	}
@@ -102,7 +99,7 @@ func (cc *Conn) DelSet(s *Set) {
 	cc.c.DelSet(s.v6)
 }
 
-func (cc *Conn) splitVals(s *Set, vals []nftables.SetElement) (vals4, vals6 []nftables.SetElement, err error) {
+func (cc *Conn) splitVals(s *Set, vals []nftables.SetElement) (vals4, vals6 []nftables.SetElement) {
 	switch {
 	case s.KeyType6.Bytes != s.KeyType.Bytes:
 		for _, val := range vals {
@@ -127,16 +124,13 @@ func (cc *Conn) splitVals(s *Set, vals []nftables.SetElement) (vals4, vals6 []nf
 			}
 		}
 	default:
-		return vals, vals, nil
+		return vals, vals
 	}
-	return vals4, vals6, nil
+	return vals4, vals6
 }
 
 func (cc *Conn) SetAddElements(s *Set, vals []nftables.SetElement) error {
-	vals4, vals6, err := cc.splitVals(s, vals)
-	if err != nil {
-		return err
-	}
+	vals4, vals6 := cc.splitVals(s, vals)
 	if err := cc.c.SetAddElements(s.v4, vals4); err != nil {
 		return err
 	}
@@ -145,10 +139,7 @@ func (cc *Conn) SetAddElements(s *Set, vals []nftables.SetElement) error {
 }
 
 func (cc *Conn) SetDeleteElements(s *Set, vals []nftables.SetElement) error {
-	vals4, vals6, err := cc.splitVals(s, vals)
-	if err != nil {
-		return err
-	}
+	vals4, vals6 := cc.splitVals(s, vals)
 	if err := cc.c.SetDeleteElements(s.v4, vals4); err != nil {
 		return err
 	}

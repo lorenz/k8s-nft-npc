@@ -14,7 +14,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
-	"k8s.io/klog/v2"
 )
 
 type Controller struct {
@@ -35,7 +34,7 @@ type Controller struct {
 
 const tableName = "k8s-nft-npc"
 
-func New(eventRecorder record.EventRecorder, podIfaceGroup uint32) *Controller {
+func New(eventRecorder record.EventRecorder, podIfaceGroup uint32) (*Controller, error) {
 	nftc, err := nftables.New(nftables.AsLasting(), nftables.WithSockOptions(func(conn *netlink.Conn) error {
 		if err := conn.SetWriteBuffer(1 << 22); err != nil {
 			return err
@@ -46,7 +45,7 @@ func New(eventRecorder record.EventRecorder, podIfaceGroup uint32) *Controller {
 		return nil
 	}))
 	if err != nil {
-		klog.Fatalf("Failed opening nftables netlink connection: %s", err)
+		return nil, fmt.Errorf("failed to open nftables netlink connection: %w", err)
 	}
 	c := &Controller{
 		rules:      make(map[*Rule]struct{}),
@@ -63,7 +62,7 @@ func New(eventRecorder record.EventRecorder, podIfaceGroup uint32) *Controller {
 	// Do not flush to atomically activate the new tables.
 	tables, err := nftc.ListTables()
 	if err != nil {
-		klog.Fatalf("Unable to list nftables tables: %v", err)
+		return nil, fmt.Errorf("unable to list nftables tables: %w", err)
 	}
 	var hasV4, hasV6 bool
 	for _, t := range tables {
@@ -172,7 +171,7 @@ func New(eventRecorder record.EventRecorder, podIfaceGroup uint32) *Controller {
 			lookup(Lookup{DestRegister: 0, IsDestRegSet: true, SourceRegister: newRegOffset + 0, Set: c.vmapEg}),
 		),
 	})
-	return c
+	return c, nil
 }
 
 func (c *Controller) Flush() error {

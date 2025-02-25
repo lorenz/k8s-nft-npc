@@ -217,7 +217,7 @@ func (c *Controller) addPodRule(r *Rule, pm *Pod) {
 	}
 }
 
-func (c *Controller) deletePod(pm *Pod) error {
+func (c *Controller) deletePod(pm *Pod) {
 	if pm.ingressChain != nil {
 		c.nftConn.SetDeleteElements(c.vmapIng, pm.vmapElements(pm.ingressChain))
 		c.nftConn.DelChain(pm.ingressChain)
@@ -242,7 +242,6 @@ func (c *Controller) deletePod(pm *Pod) error {
 			c.nftConn.SetDeleteElements(r.NamedPortSet, pm.namedPortElements(r.NamedPortMeta))
 		}
 	}
-	return nil
 }
 
 func (c *Controller) SetPod(name cache.ObjectName, pod *corev1.Pod) {

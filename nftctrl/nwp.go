@@ -80,7 +80,7 @@ func (sel PodSelector) Matches(pm *Pod, selNs string, namespaces map[string]*Nam
 	return true
 }
 
-func (c *Controller) createPeers(ch *nfds.Chain, peers []nwkv1.NetworkPolicyPeer, ports []nwkv1.NetworkPolicyPort, prefix string, dir direction, nwp *nwkv1.NetworkPolicy) (*Rule, error) {
+func (c *Controller) createPeers(ch *nfds.Chain, peers []nwkv1.NetworkPolicyPeer, ports []nwkv1.NetworkPolicyPort, prefix string, dir direction, nwp *nwkv1.NetworkPolicy) *Rule {
 	var meta Rule
 
 	meta.podRefs = make(map[*Pod]struct{})
@@ -239,7 +239,7 @@ func (c *Controller) createPeers(ch *nfds.Chain, peers []nwkv1.NetworkPolicyPeer
 	if len(portProtos) == 0 && len(ports) > 0 {
 		// If non-numbered port rules exist but no numbered ones, skip numbered
 		// traffic, which is handled by the rest of this function.
-		return &meta, nil
+		return &meta
 	}
 
 	var portProtoExprs []expr.Any
@@ -375,17 +375,18 @@ func (c *Controller) createPeers(ch *nfds.Chain, peers []nwkv1.NetworkPolicyPeer
 			Exprs: append(exprs, &expr.Verdict{Kind: expr.VerdictAccept}),
 		})
 	}
-	return &meta, nil
+	return &meta
 }
 
-func (c *Controller) createNWP(nwp *nwkv1.NetworkPolicy, name cache.ObjectName) (*Policy, error) {
+func (c *Controller) createNWP(nwp *nwkv1.NetworkPolicy, name cache.ObjectName) {
 	var pm Policy
 	var err error
 	pm.Namespace = nwp.Namespace
 	pm.ID = objectID(&nwp.ObjectMeta)
 	pm.PodSelector, err = metav1.LabelSelectorAsSelector(&nwp.Spec.PodSelector)
 	if err != nil {
-		return nil, fmt.Errorf("bad PodSelector: %w", err)
+		c.eventRecorder.Eventf(nwp, corev1.EventTypeWarning, "InvalidPolicy", "podSelector invalid: %v", err)
+		return
 	}
 
 	var isIngress, isEgress bool
@@ -412,10 +413,7 @@ func (c *Controller) createNWP(nwp *nwkv1.NetworkPolicy, name cache.ObjectName) 
 		}
 		c.nftConn.AddChain(&ingChain)
 		for i, ingRule := range nwp.Spec.Ingress {
-			meta, err := c.createPeers(&ingChain, ingRule.From, ingRule.Ports, fmt.Sprintf("%s_%d", ingChain.Name, i), dirIngress, nwp)
-			if err != nil {
-				return nil, fmt.Errorf("failed to create ingress peer rules: %w", err)
-			}
+			meta := c.createPeers(&ingChain, ingRule.From, ingRule.Ports, fmt.Sprintf("%s_%d", ingChain.Name, i), dirIngress, nwp)
 			for _, pod := range c.pods {
 				c.addPodRule(meta, pod)
 			}
@@ -432,10 +430,7 @@ func (c *Controller) createNWP(nwp *nwkv1.NetworkPolicy, name cache.ObjectName) 
 		}
 		c.nftConn.AddChain(&egChain)
 		for i, egRule := range nwp.Spec.Egress {
-			meta, err := c.createPeers(&egChain, egRule.To, egRule.Ports, fmt.Sprintf("%s_%d", egChain.Name, i), dirEgress, nwp)
-			if err != nil {
-				return nil, fmt.Errorf("failed to create egress peer rules: %w", err)
-			}
+			meta := c.createPeers(&egChain, egRule.To, egRule.Ports, fmt.Sprintf("%s_%d", egChain.Name, i), dirEgress, nwp)
 			for _, pod := range c.pods {
 				c.addPodRule(meta, pod)
 			}
@@ -450,7 +445,6 @@ func (c *Controller) createNWP(nwp *nwkv1.NetworkPolicy, name cache.ObjectName) 
 		c.addPodNWP(&pm, pod)
 	}
 	c.nwps[name] = &pm
-	return &pm, nil
 }
 
 func (c *Controller) deleteRules(rm []*Rule) {
@@ -483,7 +477,7 @@ func (c *Controller) deleteNWP(pm *Policy, name cache.ObjectName) {
 	delete(c.nwps, name)
 }
 
-func (c *Controller) SetNetworkPolicy(name cache.ObjectName, nwp *nwkv1.NetworkPolicy) error {
+func (c *Controller) SetNetworkPolicy(name cache.ObjectName, nwp *nwkv1.NetworkPolicy) {
 	syncedNWP := c.nwps[name]
 	switch {
 	case syncedNWP == nil && nwp != nil:
@@ -499,5 +493,4 @@ func (c *Controller) SetNetworkPolicy(name cache.ObjectName, nwp *nwkv1.NetworkP
 	case syncedNWP == nil && nwp == nil:
 		// Nothing to do
 	}
-	return nil
 }

@@ -38,7 +38,7 @@ type Controller struct {
 	nsInformer      cv1if.NamespaceInformer
 	nwpInformer     nwkv1if.NetworkPolicyInformer
 
-	q            workqueue.TypedRateLimitingInterface[workItem]
+	q            workqueue.TypedInterface[workItem]
 	hasProcessed synctrack.AsyncTracker[workItem]
 
 	eventRecorder record.EventRecorder
@@ -51,7 +51,7 @@ type workItem struct {
 
 type updateEnqueuer struct {
 	typ          string
-	q            workqueue.TypedRateLimitingInterface[workItem]
+	q            workqueue.TypedInterface[workItem]
 	hasProcessed *synctrack.AsyncTracker[workItem]
 }
 
@@ -102,12 +102,7 @@ func (c *Controller) worker() {
 		case "nwp":
 			nwp, _ := c.nwpInformer.Lister().NetworkPolicies(i.name.Namespace).Get(i.name.Name)
 			klog.Infof("Syncing NWP %v", i.name)
-			if err := c.nft.SetNetworkPolicy(i.name, nwp); err == nil {
-				c.q.Forget(i)
-			} else {
-				klog.Warningf("SetNetworkPolicy error, requeuing: %v", err)
-				c.q.AddRateLimited(i)
-			}
+			c.nft.SetNetworkPolicy(i.name, nwp)
 			c.q.Done(i)
 			if c.hasProcessed.HasSynced() {
 				if err := c.nft.Flush(); err != nil {
@@ -157,14 +152,18 @@ func main() {
 	eventBroadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{Interface: kubeClient.CoreV1().Events("")})
 
 	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: "npc"})
+	nft, err := nftctrl.New(recorder, uint32(*podIfaceGroup))
+	if err != nil {
+		klog.Fatalf("Error creating nftables controller: %s", err.Error())
+	}
 
 	c := Controller{
-		nft:           nftctrl.New(recorder, uint32(*podIfaceGroup)),
+		nft:           nft,
 		eventRecorder: recorder,
 	}
 
 	c.informerFactory = informers.NewSharedInformerFactory(kubeClient, 0)
-	c.q = workqueue.NewTypedRateLimitingQueue(workqueue.DefaultTypedControllerRateLimiter[workItem]())
+	c.q = workqueue.NewTyped[workItem]()
 
 	c.nsInformer = c.informerFactory.Core().V1().Namespaces()
 	nsHandler, _ := c.nsInformer.Informer().AddEventHandler(&updateEnqueuer{q: c.q, typ: "ns", hasProcessed: &c.hasProcessed})
