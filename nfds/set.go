@@ -101,23 +101,23 @@ func (cc *Conn) DelSet(s *Set) {
 
 func (cc *Conn) splitVals(s *Set, vals []nftables.SetElement) (vals4, vals6 []nftables.SetElement) {
 	switch {
-	case s.KeyType6.Bytes != s.KeyType.Bytes:
+	case s.v4.KeyType.Bytes != s.v6.KeyType.Bytes:
 		for _, val := range vals {
 			switch len(val.Key) {
-			case int(s.KeyType6.Bytes):
+			case int(s.v6.KeyType.Bytes):
 				vals6 = append(vals6, val)
-			case int(s.KeyType.Bytes):
+			case int(s.v4.KeyType.Bytes):
 				vals4 = append(vals4, val)
 			default:
 				panic("bad length, fix me later")
 			}
 		}
-	case s.DataType.Bytes != s.DataType6.Bytes:
+	case s.v4.DataType.Bytes != s.v6.DataType.Bytes:
 		for _, val := range vals {
 			switch len(val.Val) {
-			case int(s.DataType6.Bytes):
+			case int(s.v6.DataType.Bytes):
 				vals6 = append(vals6, val)
-			case int(s.DataType.Bytes):
+			case int(s.v4.DataType.Bytes):
 				vals4 = append(vals4, val)
 			default:
 				panic("bad length, fix me later")
